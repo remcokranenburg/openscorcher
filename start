@@ -1,0 +1,7 @@
+#!/bin/sh
+
+if [ "$1" = "-r" ]; then
+    cargo run --release
+else
+    cargo run -F bevy/dynamic_linking
+fi

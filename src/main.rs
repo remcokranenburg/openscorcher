@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use bevy::render::mesh::primitives::SphereMeshBuilder;
+use bevy_rapier3d::prelude::*;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_systems(Startup, setup)
         .run();
 }
@@ -15,6 +17,7 @@ fn setup(
 ) {
     // Plane (10x10)
     commands.spawn((
+        Collider::cuboid(5.0, 0.05, 5.0),
         Mesh3d(meshes.add(Cuboid::new(10.0, 0.1, 10.0))),
         MeshMaterial3d(materials.add(Color::srgb_u8(77, 128, 77))),
         Transform::from_xyz(0.0, 0.0, 0.0),
@@ -22,9 +25,12 @@ fn setup(
 
     // Sphere (radius 1)
     commands.spawn((
+        Collider::ball(1.0),
         Mesh3d(meshes.add(SphereMeshBuilder::new(1.0, Default::default()))),
         MeshMaterial3d(materials.add(Color::srgb_u8(204, 51, 51))),
-        Transform::from_xyz(0.0, 1.0, 0.0),
+        Transform::from_xyz(0.0, 10.0, 0.0),
+        Restitution::coefficient(0.7),
+        RigidBody::Dynamic,
     ));
 
     // Light
