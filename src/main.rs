@@ -1,8 +1,50 @@
+use bevy::app::AppExit;
+use bevy::input::ButtonInput;
+use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::primitives::SphereMeshBuilder;
 use bevy::window::WindowTheme;
 use bevy_rapier3d::prelude::*;
+
+const BALL_MAX_SPEED: f32 = 20.0;
+const BALL_MAX_REVERSE_SPEED: f32 = -10.0;
+const BALL_FORCE: f32 = 30.0;
+const BALL_STRAFE_FORCE: f32 = 20.0;
+const BALL_ANGULAR_SPEED: f32 = 1.0;
+const BALL_FRICTION: f32 = 0.98;
+const BALL_ANGULAR_FRICTION: f32 = 0.95;
+
+#[derive(Component)]
+struct Ball;
+
+#[derive(Resource, Default)]
+struct BallOrientation(f32); // Yaw in radians
+
+fn spawn_ball(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    commands.spawn((
+        Ball,
+        Collider::ball(1.0),
+        Mesh3d(meshes.add(SphereMeshBuilder::new(
+            1.0,
+            SphereKind::Ico { subdivisions: 8 },
+        ))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(51, 204, 51))),
+        Transform::from_xyz(0.0, 5.0, 0.0),
+        PointLight {
+            shadows_enabled: true,
+            color: Color::srgb_u8(0, 64, 0),
+            ..default()
+        },
+        Restitution::coefficient(0.7),
+        RigidBody::Dynamic,
+        ExternalForce::default(),
+    ));
+}
 
 fn main() {
     App::new()
@@ -18,7 +60,12 @@ fn main() {
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
+        .insert_resource(BallOrientation::default())
         .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (handle_input, apply_friction, respawn_when_off_track),
+        )
         .run();
 }
 
@@ -29,30 +76,12 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Collider::cuboid(5.0, 0.05, 5.0),
-        Mesh3d(meshes.add(Cuboid::new(20.0, 0.1, 20.0))),
+        Collider::cuboid(10.0, 0.1, 10.0),
+        Mesh3d(meshes.add(Cuboid::new(20.0, 0.2, 20.0))),
         MeshMaterial3d(materials.add(Color::srgb_u8(64, 38, 38))),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
-
-    // Sphere
-    commands
-        .spawn((
-            Collider::ball(1.0),
-            Mesh3d(meshes.add(SphereMeshBuilder::new(
-                1.0,
-                SphereKind::Ico { subdivisions: 8 },
-            ))),
-            MeshMaterial3d(materials.add(Color::srgb_u8(51, 204, 51))),
-            Transform::from_xyz(0.0, 5.0, 0.0),
-            Restitution::coefficient(0.7),
-            RigidBody::Dynamic,
-        ))
-        .with_child(PointLight {
-            shadows_enabled: true,
-            color: Color::srgb_u8(0, 64, 0),
-            ..default()
-        });
+    spawn_ball(&mut commands, &mut meshes, &mut materials);
 
     // Light
     commands.spawn((
@@ -68,4 +97,71 @@ fn setup(
         Camera3d::default(),
         Transform::from_xyz(0.0, 8.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+fn handle_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut exit: EventWriter<AppExit>,
+    mut ball_query: Query<(&mut ExternalForce, &mut Transform), With<Ball>>,
+    mut orientation: ResMut<BallOrientation>,
+    time: Res<Time>,
+) {
+    if keyboard.any_pressed([KeyCode::KeyW, KeyCode::KeyQ])
+        && keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
+    {
+        exit.write(AppExit::Success);
+    }
+    let dt = time.delta_secs();
+    if let Ok((mut ext_force, mut transform)) = ball_query.single_mut() {
+        let mut force = Vec3::ZERO;
+        let mut angular = 0.0;
+        // Forward/Backward
+        if keyboard.pressed(KeyCode::ArrowUp) {
+            force += Vec3::Z * -BALL_FORCE;
+        }
+        if keyboard.pressed(KeyCode::ArrowDown) {
+            force += Vec3::Z * BALL_FORCE;
+        }
+        // Left/Right (strafe)
+        if keyboard.pressed(KeyCode::ArrowLeft) {
+            force += Vec3::X * -BALL_STRAFE_FORCE;
+            angular += BALL_ANGULAR_SPEED * dt;
+        }
+        if keyboard.pressed(KeyCode::ArrowRight) {
+            force += Vec3::X * BALL_STRAFE_FORCE;
+            angular -= BALL_ANGULAR_SPEED * dt;
+        }
+        // Apply orientation
+        let yaw = orientation.0;
+        let rot = Quat::from_rotation_y(yaw);
+        let force = rot * force;
+        ext_force.force = force;
+        // Angular momentum
+        orientation.0 += angular;
+        // Update transform rotation for visual orientation
+        transform.rotation = Quat::from_rotation_y(orientation.0);
+    }
+}
+
+fn apply_friction(mut ball_query: Query<&mut Velocity, With<Ball>>) {
+    if let Ok(mut velocity) = ball_query.single_mut() {
+        velocity.linvel *= BALL_FRICTION;
+        velocity.angvel *= BALL_ANGULAR_FRICTION;
+    }
+}
+
+fn respawn_when_off_track(
+    mut commands: Commands,
+    ball_query: Query<(Entity, &Transform), With<Ball>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut orientation: ResMut<BallOrientation>,
+) {
+    if let Ok((entity, transform)) = ball_query.single() {
+        if transform.translation.y < -5.0 {
+            commands.entity(entity).despawn();
+            spawn_ball(&mut commands, &mut meshes, &mut materials);
+            orientation.0 = 0.0;
+        }
+    }
 }
