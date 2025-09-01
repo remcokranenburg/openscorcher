@@ -27,15 +27,15 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Plane (10x10)
+    // Ground
     commands.spawn((
         Collider::cuboid(5.0, 0.05, 5.0),
-        Mesh3d(meshes.add(Cuboid::new(10.0, 0.1, 10.0))),
+        Mesh3d(meshes.add(Cuboid::new(20.0, 0.1, 20.0))),
         MeshMaterial3d(materials.add(Color::srgb_u8(64, 38, 38))),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
 
-    // Sphere (radius 1)
+    // Sphere
     commands
         .spawn((
             Collider::ball(1.0),
