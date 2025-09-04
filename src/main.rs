@@ -16,18 +16,20 @@ const BALL_FRICTION: f32 = 0.98;
 const BALL_ANGULAR_FRICTION: f32 = 0.95;
 
 #[derive(Component)]
-struct Ball;
+struct RaceBall(usize);
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 struct BallOrientation(f32); // Yaw in radians
 
 fn spawn_ball(
+    id: usize,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn((
-        Ball,
+        RaceBall(id),
+        BallOrientation::default(),
         Collider::ball(1.0),
         Mesh3d(meshes.add(SphereMeshBuilder::new(
             1.0,
@@ -61,11 +63,15 @@ fn main() {
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
-        .insert_resource(BallOrientation::default())
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (handle_input, apply_friction, respawn_when_off_track),
+            (
+                handle_input,
+                apply_friction,
+                respawn_when_off_track,
+                move_camera,
+            ),
         )
         .run();
 }
@@ -82,7 +88,7 @@ fn setup(
         MeshMaterial3d(materials.add(Color::srgb_u8(64, 38, 38))),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
-    spawn_ball(&mut commands, &mut meshes, &mut materials);
+    spawn_ball(0, &mut commands, &mut meshes, &mut materials);
 
     // Light
     commands.spawn((
@@ -103,8 +109,12 @@ fn setup(
 fn handle_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut exit: EventWriter<AppExit>,
-    mut ball_query: Query<(&mut ExternalForce, &mut Transform), With<Ball>>,
-    mut orientation: ResMut<BallOrientation>,
+    mut ball_query: Query<(
+        &mut ExternalForce,
+        &mut Transform,
+        &RaceBall,
+        &mut BallOrientation,
+    )>,
     time: Res<Time>,
 ) {
     if keyboard.any_pressed([KeyCode::KeyW, KeyCode::KeyQ])
@@ -113,7 +123,8 @@ fn handle_input(
         exit.write(AppExit::Success);
     }
     let dt = time.delta_secs();
-    if let Ok((mut ext_force, mut transform)) = ball_query.single_mut() {
+    if let Ok((mut ext_force, mut transform, race_ball, mut orientation)) = ball_query.single_mut()
+    {
         let mut force = Vec3::ZERO;
         let mut angular = 0.0;
         // Forward/Backward
@@ -144,7 +155,7 @@ fn handle_input(
     }
 }
 
-fn apply_friction(mut ball_query: Query<&mut Velocity, With<Ball>>) {
+fn apply_friction(mut ball_query: Query<&mut Velocity, With<RaceBall>>) {
     if let Ok(mut velocity) = ball_query.single_mut() {
         velocity.linvel *= BALL_FRICTION;
         velocity.angvel *= BALL_ANGULAR_FRICTION;
@@ -153,16 +164,40 @@ fn apply_friction(mut ball_query: Query<&mut Velocity, With<Ball>>) {
 
 fn respawn_when_off_track(
     mut commands: Commands,
-    ball_query: Query<(Entity, &Transform), With<Ball>>,
+    mut ball_query: Query<(Entity, &Transform, &mut BallOrientation, &RaceBall)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut orientation: ResMut<BallOrientation>,
 ) {
-    if let Ok((entity, transform)) = ball_query.single() {
+    if let Ok((entity, transform, mut orientation, race_ball)) = ball_query.single_mut() {
         if transform.translation.y < -5.0 {
             commands.entity(entity).despawn();
-            spawn_ball(&mut commands, &mut meshes, &mut materials);
+            spawn_ball(race_ball.0, &mut commands, &mut meshes, &mut materials);
             orientation.0 = 0.0;
         }
+    }
+}
+
+fn move_camera(
+    ball_query: Query<(&Transform, &RaceBall)>,
+    mut camera_query: Query<&mut Transform, (With<Camera3d>, Without<RaceBall>)>,
+    time: Res<Time>,
+) {
+    if let (Ok((ball_transform, _)), Ok(mut cam_transform)) =
+        (ball_query.single(), camera_query.single_mut())
+    {
+        let ball_pos = ball_transform.translation;
+        let ball_rot = ball_transform.rotation;
+        // Desired camera position: 12 units behind, 8 units above
+        let back = ball_rot * Vec3::Z * 12.0;
+        let up = Vec3::Y * 8.0;
+        let target_pos = ball_pos + back + up;
+        // Interpolate position
+        let lerp_factor = time.delta().as_secs_f32() / 0.5;
+        cam_transform.translation = cam_transform.translation.lerp(target_pos, lerp_factor);
+        // Desired camera rotation: looking at the ball
+        let target_rot = Transform::from_translation(cam_transform.translation)
+            .looking_at(ball_pos, Vec3::Y)
+            .rotation;
+        cam_transform.rotation = cam_transform.rotation.slerp(target_rot, lerp_factor);
     }
 }
