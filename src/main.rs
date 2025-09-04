@@ -4,7 +4,7 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::render::mesh::SphereKind;
 use bevy::render::mesh::primitives::SphereMeshBuilder;
-use bevy::window::WindowTheme;
+use bevy::window::{MonitorSelection, VideoModeSelection, WindowMode, WindowTheme};
 use bevy_rapier3d::prelude::*;
 
 const BALL_MAX_SPEED: f32 = 20.0;
@@ -54,6 +54,7 @@ fn main() {
                 prevent_default_event_handling: false,
                 title: "openScorcher".into(),
                 window_theme: Some(WindowTheme::Dark),
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
                 ..Default::default()
             }),
             ..Default::default()
