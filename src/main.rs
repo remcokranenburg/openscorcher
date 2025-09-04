@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use bevy::app::AppExit;
 use bevy::input::ButtonInput;
-use bevy::input::keyboard::{Key, KeyCode};
+use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
 use bevy::render::mesh::SphereKind;
@@ -10,8 +10,6 @@ use bevy::render::mesh::primitives::SphereMeshBuilder;
 use bevy::window::{MonitorSelection, WindowMode, WindowResized, WindowTheme};
 use bevy_rapier3d::prelude::*;
 
-const BALL_MAX_SPEED: f32 = 20.0;
-const BALL_MAX_REVERSE_SPEED: f32 = -10.0;
 const BALL_FORCE: f32 = 30.0;
 const BALL_STRAFE_FORCE: f32 = 20.0;
 const BALL_ANGULAR_SPEED: f32 = 1.0;
@@ -164,7 +162,9 @@ fn handle_input(
         && keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
     {
         exit.write(AppExit::Success);
+        return;
     }
+
     let dt = time.delta_secs();
 
     for (mut ext_force, mut transform, race_ball, mut orientation) in ball_query.iter_mut() {
@@ -229,7 +229,7 @@ fn respawn_when_off_track(
 fn set_camera_viewports(
     windows: Query<&Window>,
     mut resize_events: EventReader<WindowResized>,
-    mut query: Query<(&mut Camera)>,
+    mut query: Query<&mut Camera>,
 ) {
     // We need to dynamically resize the camera's viewports whenever the window size changes
     // so then each camera always takes up half the screen.
