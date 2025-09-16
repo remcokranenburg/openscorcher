@@ -15,7 +15,7 @@ const BALL_STRAFE_FORCE: f32 = 20.0;
 const BALL_ANGULAR_SPEED: f32 = 1.0;
 const BALL_FRICTION: f32 = 0.98;
 const BALL_ANGULAR_FRICTION: f32 = 0.95;
-const COLORS: [Color; 2] = [Color::srgb_u8(51, 204, 51), Color::srgb_u8(204, 51, 51)];
+const COLORS: [Color; 2] = [Color::srgb_u8(51, 204, 51), Color::srgb_u8(255, 51, 51)];
 const KEY_FORWARD: [KeyCode; 2] = [KeyCode::KeyW, KeyCode::ArrowUp];
 const KEY_BACKWARD: [KeyCode; 2] = [KeyCode::KeyS, KeyCode::ArrowDown];
 const KEY_LEFT: [KeyCode; 2] = [KeyCode::KeyA, KeyCode::ArrowLeft];
@@ -45,17 +45,36 @@ fn spawn_ball(
             1.0,
             SphereKind::Ico { subdivisions: 8 },
         ))),
-        MeshMaterial3d(materials.add(COLORS[id % COLORS.len()])),
+        MeshMaterial3d(materials.add(COLORS[id])),
         transform,
         PointLight {
             shadows_enabled: true,
-            color: COLORS[id % COLORS.len()].darker(0.4),
+            color: COLORS[id].darker(0.1),
             ..default()
         },
         Restitution::coefficient(0.7),
         RigidBody::Dynamic,
         ExternalForce::default(),
     ));
+}
+
+#[derive(States, PartialEq, Eq, Clone, Copy, Debug, Hash, Default)]
+enum CameraState {
+    #[default]
+    Camera1,
+    Camera2,
+}
+
+fn camera_state_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<CameraState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Digit1) {
+        next_state.set(CameraState::Camera1);
+    }
+    if keyboard.just_pressed(KeyCode::Digit2) {
+        next_state.set(CameraState::Camera2);
+    }
 }
 
 fn main() {
@@ -73,6 +92,7 @@ fn main() {
         }))
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
+        .init_state::<CameraState>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -81,7 +101,9 @@ fn main() {
                 apply_friction,
                 respawn_when_off_track,
                 set_camera_viewports,
-                move_camera,
+                camera_state_input,
+                move_camera1.run_if(in_state(CameraState::Camera1)),
+                move_camera2.run_if(in_state(CameraState::Camera2)),
             ),
         )
         .run();
@@ -94,10 +116,10 @@ fn setup(
 ) {
     // Ground
     commands.spawn((
-        Collider::cuboid(10.0, 0.1, 10.0),
-        Mesh3d(meshes.add(Cuboid::new(20.0, 0.2, 20.0))),
+        Collider::cuboid(10.0, 0.1, 100.0),
+        Mesh3d(meshes.add(Cuboid::new(20.0, 0.2, 200.0))),
         MeshMaterial3d(materials.add(Color::srgb_u8(64, 38, 38))),
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, 0.0, -90.0),
     ));
 
     // Balls
@@ -248,7 +270,7 @@ fn set_camera_viewports(
     }
 }
 
-fn move_camera(
+fn move_camera1(
     ball_query: Query<(&Transform, &RaceBall)>,
     mut camera_query: Query<(&mut Transform, &CameraId), (With<Camera3d>, Without<RaceBall>)>,
     time: Res<Time>,
@@ -273,6 +295,38 @@ fn move_camera(
                 .looking_at(ball_pos, Vec3::Y)
                 .rotation;
             camera_transform.rotation = camera_transform.rotation.slerp(target_rot, lerp_factor);
+        }
+    }
+}
+
+fn move_camera2(
+    ball_query: Query<(&Transform, &RaceBall)>,
+    mut camera_query: Query<(&mut Transform, &CameraId), (With<Camera3d>, Without<RaceBall>)>,
+    _time: Res<Time>,
+) {
+    for (ball_transform, race_ball) in ball_query.iter() {
+        for (mut camera_transform, camera_id) in camera_query.iter_mut() {
+            if race_ball.0 != camera_id.0 {
+                continue;
+            }
+            let ball_pos = ball_transform.translation;
+            let cam_pos = camera_transform.translation;
+            // Use camera's xz, ball's y
+            let mut cam_xz = Vec2::new(cam_pos.x, cam_pos.z);
+            let ball_xz = Vec2::new(ball_pos.x, ball_pos.z);
+            // Special case: if came`ra xz == ball xz, offset z by +1
+            if (cam_xz - ball_xz).length_squared() < 1e-6 {
+                cam_xz.y += 1.0;
+            }
+            // Direction from ball to camera in xz
+            let dir = (cam_xz - ball_xz).normalize_or_zero();
+            let new_xz = ball_xz + dir * 12.0;
+            // Set camera position
+            camera_transform.translation = Vec3::new(new_xz.x, ball_pos.y + 4.0, new_xz.y);
+            // Look at the ball
+            camera_transform.rotation = Transform::from_translation(camera_transform.translation)
+                .looking_at(ball_pos, Vec3::Y)
+                .rotation;
         }
     }
 }
